@@ -31,7 +31,8 @@ gd = Optimiser(
 ```
 which means that we have to provide a model function that we are trying to "learn", an initial guess for the parameters (`params`) of that model and our training inputs and outputs generated with the model for known parameters. If we want to use PyTorch optimiser, we need to pass the information about the function that we want to apply, e.g., `optim.SGD`:
 
-```optimiser = Optimiser(
+```
+optimiser = Optimiser(
                 model=linear_model_nn,
                 inputs=t_un,
                 outputs=t_c,
