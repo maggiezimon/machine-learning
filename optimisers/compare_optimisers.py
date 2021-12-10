@@ -1,8 +1,11 @@
-'''Implement different optimisers and analyse their performance'''
+"""Implement different optimisers and analyse their performance"""
+import os
+
 import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch import Tensor
+from torchvision import datasets
 from matplotlib import pyplot as plt
 from celluloid import Camera
 from numpy import e, pi, sqrt
@@ -27,14 +30,14 @@ class Optimiser:
         self.loss_fn = loss_fn
         self.losses = []
         self.parameters = []
+
     def training_loop(self, n_epochs, learning_rate):
         for epoch in range(1, n_epochs + 1):
-
+            # Forward pass
             if self.optimiser is None:
                 if self.params.grad is not None:
                     # Zero the gradient explicitly as it accumulates
                     self.params.grad.zero_()
-                # Forward pass
                 predictions = self.model(self.inputs, *self.params)
             else:
                 # Using built-in optimisers
@@ -57,6 +60,7 @@ class Optimiser:
                 self.optimiser.step()
                 parameters = [float(self.model.weight.detach()), float(self.model.bias.detach())]
                 ##################
+            # Keep a record of the learned parameters at every epoch
             self.losses.append(float(loss))
             self.parameters.append([*parameters])
 
@@ -65,28 +69,38 @@ class Optimiser:
                 # print('Gradient: {0}'.format(self.params.grad.detach()))
                 print('Parameters: ', self.parameters[-1])
 
-    def loss_landscape(self, number_of_points=100, bounds=[(0, 10)]):
+    def loss_landscape(self, number_of_points=100, bounds=None):
+        if bounds is None:
+            bounds = [(0, 10)]
         parameter_array = []
         dimension = self.params.size()[0]
         for index in range(dimension):
             parameter_array.append(
-                    torch.linspace(*bounds[index], steps=number_of_points))
+                torch.linspace(*bounds[index], steps=number_of_points))
 
         meshes = torch.meshgrid(*parameter_array)
         loss = []
         if self.optimiser is None:
             for parameters in torch.reshape(
                     (torch.stack(meshes).T),
-                    [number_of_points**dimension, dimension]):
+                    [number_of_points ** dimension, dimension]):
                 predictions = self.model(self.inputs, *parameters)
                 loss.append(self.loss_fn(predictions, self.outputs))
         return parameter_array, loss
 
-# User defined functions
+
+"""
+User-defined models:
+"""
+
+
+def linear_model(t_u, w, b):
+    """Model to be established; w - weight, b - bias"""
+    return w * t_u + b
 
 
 class AckleyModel:
-    '''Implementation of a non-convex function Auckley function
+    """Implementation of a non-convex function Ackley function
 
     d-dimensional function (usually evaluated on `[-32.768, 32.768]^d`):
 
@@ -94,7 +108,7 @@ class AckleyModel:
             exp(1/d sum_{i=1}^d cos(c x_i)) + A + exp(1)
 
     f has one minimizer for its global minimum at `z_1 = (0, 0, ..., 0)` with
-    `f(z_1) = 0`.'''
+    `f(z_1) = 0`."""
 
     def __init__(
             self, dim: int = 2, X: Tensor = None
@@ -108,6 +122,9 @@ class AckleyModel:
         self.X = X
 
     def generate_points(self, number_of_points: int) -> None:
+        # torch.FLoatTensor() returns a random tensor by default
+        # tensor.uniform_() returns variables in a normal distribution, defaulting to the range (0, 1)
+        # args to tensor.uniform_() specify the lower and upper bounds of the normal distribution
         self.X = torch.FloatTensor(number_of_points, self.dim).uniform_(
             *self._bounds[0])
 
@@ -123,9 +140,11 @@ class AckleyModel:
             b = self.b
         if c is None:
             c = self.c
+        part1 = 0
+        part2 = 0
         if points is not None:
             part1 = -a * torch.exp(
-                    -b / sqrt(self.dim) * torch.norm(points, dim=-1))
+                -b / sqrt(self.dim) * torch.norm(points, dim=-1))
             part2 = -(torch.exp(torch.mean(torch.cos(c * points), dim=-1)))
         return part1 + part2 + a + e
 
@@ -142,18 +161,58 @@ class AckleyModel:
         return self._evaluate(points, a, b, c)
 
 
-def linear_model(t_u, w, b):
-    '''Model to be established; w - weight, b - bias'''
-    return w * t_u + b
+class MichalewiczFunction:
+    """Implementation of the Michalwicz function with many local minima.
+    """
 
-# Visuallisation
+    def __init__(
+            self, dim: int = 2, X: torch.Tensor = None
+    ) -> None:
+        self.dim = dim
+        self._bounds = [(0, pi) for _ in range(self.dim)]
+        # optimal value for d=2
+        if dim == 2:
+            self._optimal_value = -1.8013
+        self.m = 10
+        self.X = X
+
+    def generate_points(self, num_points: int) -> None:
+        self.X = torch.FloatTensor(num_points, self.dim).uniform_(*self._bounds[0])
+
+    def _evaluate(
+            self,
+            points: torch.Tensor = None,
+            m: float = None) -> torch.Tensor:
+        if m is None:
+            m = self.m
+        if points is not None:
+            return torch.Tensor(
+                (-1 * torch.sum((torch.sin(points)
+                                 * torch.cat(
+                            [torch.sin(((points[:, dim].unsqueeze(1) ** 2) * (dim + 1) / pi)) ** (2 * m) for dim in
+                             range(points.shape[-1])], dim=-1)),
+                                dim=-1)
+                 )
+            )
+
+    def evaluate_true(self, points: torch.Tensor = None) -> torch.Tensor:
+        if points is not None:
+            return self._evaluate(points)
+        else:
+            return self._evaluate(self.X)
+
+    def evaluate_estimate(self, points: torch.Tensor, m: float = None) -> torch.Tensor:
+        return self._evaluate(points, m)
+
+
+# Visualisation
 def loss_landscape_3d(parameter_array, loss_array, parameter_points, loss_points):
     meshes = torch.meshgrid(*parameter_array)
     output = torch.reshape(torch.Tensor(loss_array), meshes[0].size())
     fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='3d' )
-    fontsize_ = 20 # set axis label fontsize
-    labelsize_ = int(0.5 * fontsize_) # set tick label fontsize
+    ax = fig.add_subplot(111, projection='3d')
+    fontsize_ = 20  # set axis label fontsize
+    labelsize_ = int(0.5 * fontsize_)  # set tick label fontsize
     ax.view_init(elev=30, azim=-10)
     ax.set_xlabel(r'parameter $a$', fontsize=fontsize_, labelpad=10)
     ax.set_ylabel(r'parameter $b$', fontsize=fontsize_, labelpad=10)
@@ -172,28 +231,28 @@ def loss_landscape_3d(parameter_array, loss_array, parameter_points, loss_points
         20)
 
     lag = 500
-    camera=Camera(fig) # create Camera object
+    camera = Camera(fig)  # create Camera object
     for index, point in enumerate(parameter_points[::lag]):
-        epoch = index + index*(lag-1)
+        epoch = index + index * (lag - 1)
         ax.scatter(point[0], point[1], loss_points[epoch],
-                marker="o", s=100,
-                color="black", alpha=1.0)
+                   marker="o", s=100,
+                   color="black", alpha=1.0)
         # Surface plot (= loss landscape):
         ax.plot_surface(
-                meshes[0].numpy().T, meshes[1].numpy().T, output.numpy(), cmap='terrain',
-                antialiased=True, cstride=1, rstride=1, alpha=0.75)
+            meshes[0].numpy().T, meshes[1].numpy().T, output.numpy(), cmap='terrain',
+            antialiased=True, cstride=1, rstride=1, alpha=0.75)
         plt.tight_layout()
-        camera.snap() # take snapshot after each iteration
+        camera.snap()  # take snapshot after each iteration
 
     video = camera.animate(
-                                repeat=False,
-                                repeat_delay=0)
+        repeat=False,
+        repeat_delay=0)
     video.save('optimisation.gif', dpi=300)  # save animation
 
 
 if __name__ == '__main__':
     # Choose the test
-    case = 'ackley'
+    case = input('Please enter case: ')
 
     if case == 'ackley':
         model = AckleyModel()
@@ -205,10 +264,10 @@ if __name__ == '__main__':
         learning_rate = 1e-3
 
         gd = Optimiser(
-                model=partial(model.evaluate_estimate, c=model.c),
-                params=params,
-                inputs=inputs,
-                outputs=outputs)
+            model=partial(model.evaluate_estimate, c=model.c),
+            params=params,
+            inputs=inputs,
+            outputs=outputs)
 
         gd.training_loop(
             n_epochs=10000,
@@ -221,14 +280,14 @@ if __name__ == '__main__':
         # Implementing the example from "Deep-Learning-with-PyTorch"
         # temperatures in Celsius
         t_c = [
-                0.5,  14.0, 15.0,
-                28.0, 11.0,  8.0,
-                3.0, -4.0,  6.0, 13.0, 21.0]
+            0.5, 14.0, 15.0,
+            28.0, 11.0, 8.0,
+            3.0, -4.0, 6.0, 13.0, 21.0]
         # temperatures in unknown units
         t_u = [
-                35.7, 55.9, 58.2,
-                81.9, 56.3, 48.9,
-                33.9, 21.8, 48.4, 60.4, 68.4]
+            35.7, 55.9, 58.2,
+            81.9, 56.3, 48.9,
+            33.9, 21.8, 48.4, 60.4, 68.4]
         # When using NN, we need to provide a matrix of size BxNin
         t_c = torch.tensor(t_c).unsqueeze(1)
         t_u = torch.tensor(t_u).unsqueeze(1)
@@ -238,20 +297,19 @@ if __name__ == '__main__':
         t_un = 0.1 * t_u
         params = torch.tensor([1.0, 0.2], requires_grad=True)
         learning_rate = 1e-2
-        # The requires_grad=True argument
-        # is telling PyTorch to track the entire
-        # family tree of tensors resulting from operations on params.
 
+        # Below code runs the linear case with the hand-coded GD written in class Optimiser
+        # by leaving Optimiser=None.
         gd = Optimiser(
-                model=linear_model,
-                params=params,
-                inputs=t_un,
-                outputs=t_c)
+            model=linear_model,
+            params=params,
+            inputs=t_un,
+            outputs=t_c)
 
         gd.training_loop(
             n_epochs=10000,
             learning_rate=learning_rate)
-        print('Parameters obtained with GD: ', gd.params.detach().numpy())
+        print('Parameters obtained with hand-written GD: ', gd.params.detach().numpy())
 
         t_p = linear_model(t_un, *gd.params)
 
@@ -266,17 +324,17 @@ if __name__ == '__main__':
         print('There are many optim options to choose from: ', dir(optim))
         print('Let us see how the built-in GD performs')
 
-         # Use NN for training
+        # Below code repeats the linear case with PyTorch's builtin SGD optimiser and a single linear layer nn.
         linear_model_nn = nn.Linear(1, 1)
 
         optimiser = Optimiser(
-                model=linear_model_nn,
-                inputs=t_un,
-                outputs=t_c,
-                optimiser=optim.SGD(
-                    linear_model_nn.parameters(),
-                    lr=learning_rate),
-                loss_fn=nn.MSELoss())
+            model=linear_model_nn,
+            inputs=t_un,
+            outputs=t_c,
+            optimiser=optim.SGD(
+                linear_model_nn.parameters(),
+                lr=learning_rate),
+            loss_fn=nn.MSELoss())
 
         optimiser.training_loop(
             n_epochs=10000,
@@ -285,3 +343,25 @@ if __name__ == '__main__':
         print(
             'Parameters obtained with GD: ',
             optimiser.model.weight, optimiser.model.bias)
+
+    if case in ['michalewicz', 'michalwicz']:
+        model = MichalewiczFunction()
+        model.generate_points(1000)
+        inputs = model.X
+        outputs = model.evaluate_true()
+
+        params = torch.tensor([1.0, 0.0], requires_grad=True)
+        learning_rate = 1e-3
+
+        gd = Optimiser(
+            model=partial(model.evaluate_estimate),
+            params=params,
+            inputs=inputs,
+            outputs=outputs)
+
+        gd.training_loop(
+            n_epochs=10000,
+            learning_rate=learning_rate)
+        print('Parameters obtained with GD: ', gd.params.detach().numpy())
+
+        predicted_outputs = model.evaluate_estimate(inputs, *gd.params)
