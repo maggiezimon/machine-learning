@@ -69,16 +69,17 @@ class Optimiser:
                 # print('Gradient: {0}'.format(self.params.grad.detach()))
                 print('Parameters: ', self.parameters[-1])
 
-    def loss_landscape(self, number_of_points=100, bounds=None):
+    def loss_landscape(self, number_of_points=100, bounds=None, indices_pair: tuple = (0, 2)):
         if bounds is None:
             bounds = [(0, 10)]
         parameter_array = []
-        dimension = self.params.size()[0]
-        for index in range(dimension):
+        dimension = len(indices_pair)
+        for index in indices_pair:
+            # Only generate bounds for the parameters to be plotted
             parameter_array.append(
                 torch.linspace(*bounds[index], steps=number_of_points))
-
-        meshes = torch.meshgrid(*parameter_array)
+        # parameter_array will only have two entries for a pair of parameters
+        meshes = torch.meshgrid(parameter_array[0], parameter_array[1])
         loss = []
         if self.optimiser is None:
             for parameters in torch.reshape(
@@ -208,6 +209,7 @@ class MichalewiczFunction:
 # Visualisation
 def loss_landscape_3d(parameter_array, loss_array, parameter_points, loss_points):
     meshes = torch.meshgrid(*parameter_array)
+    # output = torch.reshape(torch.Tensor(loss_array), [20, 20, 20])
     output = torch.reshape(torch.Tensor(loss_array), meshes[0].size())
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -260,11 +262,12 @@ if __name__ == '__main__':
         inputs = model.X
         outputs = model.evaluate_true()
 
-        params = torch.tensor([1.0, 0.0], requires_grad=True)
+        params = torch.tensor([1.0, 0.0, 1.0], requires_grad=True)
         learning_rate = 1e-3
 
         gd = Optimiser(
-            model=partial(model.evaluate_estimate, c=model.c),
+            #model=partial(model.evaluate_estimate, c=model.c),
+            model=model.evaluate_estimate,
             params=params,
             inputs=inputs,
             outputs=outputs)
